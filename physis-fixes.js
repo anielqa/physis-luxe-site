@@ -61,14 +61,35 @@
   }
 
   var observer = new MutationObserver(function() {
-    if (document.querySelector('.header__logo-wrapper')) applyFixes();
+    applyFixes();
   });
 
   observer.observe(document.documentElement, { childList: true, subtree: true });
+
   document.addEventListener('DOMContentLoaded', applyFixes);
+
+  window.addEventListener('popstate', function() {
+    setTimeout(applyFixes, 100);
+    setTimeout(applyFixes, 500);
+  });
+
+  window.addEventListener('hashchange', function() {
+    setTimeout(applyFixes, 100);
+    setTimeout(applyFixes, 500);
+  });
+
+  var lastUrl = location.href;
+  setInterval(function() {
+    if (location.href !== lastUrl) {
+      lastUrl = location.href;
+      setTimeout(applyFixes, 100);
+      setTimeout(applyFixes, 300);
+      setTimeout(applyFixes, 600);
+    }
+  }, 300);
+
   setTimeout(applyFixes, 300);
   setTimeout(applyFixes, 800);
   setTimeout(applyFixes, 1500);
-  setTimeout(function() { observer.disconnect(); }, 15000);
 
 })();
