@@ -1,5 +1,6 @@
-(function() {
+(function () {
 
+  // Inject styles immediately — synchronous, before paint
   var s = document.createElement('style');
   s.innerHTML = '@media(max-width:768px){'
     + '.header__logo{--mobile-width:160px!important}'
@@ -13,17 +14,19 @@
     + '.w-header{background-color:transparent!important;background:transparent!important}'
     + '.w-container.header__content-container{justify-content:center!important;display:flex!important}'
     + '.w-cell.header__flex{display:flex!important;justify-content:center!important;flex:unset!important;width:100%!important}'
+    // Prevent layout shift before JS runs
+    + '.header__logo-wrapper{position:static!important}'
     + '}';
   document.head.appendChild(s);
 
   function applyFixes() {
-    document.querySelectorAll('.header__logo-wrapper, .header__logo, [class*="logo-wrapper"]').forEach(function(el) {
+    document.querySelectorAll('.header__logo-wrapper, .header__logo, [class*="logo-wrapper"]').forEach(function (el) {
       el.style.setProperty('background', 'transparent', 'important');
       el.style.setProperty('background-color', 'transparent', 'important');
       el.style.setProperty('border', 'none', 'important');
     });
 
-    document.querySelectorAll('.w-block-background, .w-block-header, .w-header').forEach(function(el) {
+    document.querySelectorAll('.w-block-background, .w-block-header, .w-header').forEach(function (el) {
       el.style.setProperty('background-color', 'transparent', 'important');
       el.style.setProperty('background', 'transparent', 'important');
       el.style.setProperty('--color-white', 'transparent', 'important');
@@ -60,36 +63,54 @@
     }
   }
 
-  var observer = new MutationObserver(function() {
+  // Narrowly scoped observer — only watch the header, not the whole document
+  function startObserver() {
+    var header = document.querySelector('.w-header, header');
+    if (!header) return;
+
+    var observer = new MutationObserver(function (mutations, obs) {
+      applyFixes();
+      // Disconnect after first fix — Square re-applies styles once on load, not continuously
+      obs.disconnect();
+
+      // Re-attach a lightweight version for SPA navigation only
+      attachNavObserver();
+    });
+
+    observer.observe(header, { childList: true, subtree: true, attributes: true });
+  }
+
+  // Lightweight SPA navigation handler — replaces setInterval URL polling
+  function attachNavObserver() {
+    var lastUrl = location.href;
+    var navObserver = new MutationObserver(function () {
+      if (location.href !== lastUrl) {
+        lastUrl = location.href;
+        setTimeout(applyFixes, 150);
+      }
+    });
+    // Watch only <title> changes — Square updates page title on navigation
+    var titleEl = document.querySelector('title');
+    if (titleEl) navObserver.observe(titleEl, { childList: true });
+  }
+
+  // Single run at DOMContentLoaded — no staggered timeouts
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () {
+      applyFixes();
+      startObserver();
+      attachNavObserver();
+    });
+  } else {
     applyFixes();
-  });
+    startObserver();
+    attachNavObserver();
+  }
 
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+  // One fallback timeout only, for Square's late style injection
+  setTimeout(applyFixes, 500);
 
-  document.addEventListener('DOMContentLoaded', applyFixes);
-
-  window.addEventListener('popstate', function() {
-    setTimeout(applyFixes, 100);
-    setTimeout(applyFixes, 500);
-  });
-
-  window.addEventListener('hashchange', function() {
-    setTimeout(applyFixes, 100);
-    setTimeout(applyFixes, 500);
-  });
-
-  var lastUrl = location.href;
-  setInterval(function() {
-    if (location.href !== lastUrl) {
-      lastUrl = location.href;
-      setTimeout(applyFixes, 100);
-      setTimeout(applyFixes, 300);
-      setTimeout(applyFixes, 600);
-    }
-  }, 300);
-
-  setTimeout(applyFixes, 300);
-  setTimeout(applyFixes, 800);
-  setTimeout(applyFixes, 1500);
+  window.addEventListener('popstate', function () { setTimeout(applyFixes, 150); });
+  window.addEventListener('hashchange', function () { setTimeout(applyFixes, 150); });
 
 })();
