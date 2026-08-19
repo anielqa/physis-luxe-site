@@ -116,6 +116,99 @@
 
 
 /* =========================================================================
+   PHYSIS LUXE — Canonical URL injection
+   -------------------------------------------------------------------------
+   Square Online emits no <link rel="canonical"> at all. As a result Google
+   indexes tracking-parameter variants of the same page as separate URLs
+   (?cs=true&cst=custom, ?si=true), splitting impressions across duplicates
+   and fragmenting rankings.
+
+   This block injects a self-referencing canonical on every page, normalised
+   to https + www with tracking parameters stripped. It re-runs on SPA
+   navigation because Square is a Vue app: the URL changes without a page
+   reload, and a canonical written once at load would go stale and point
+   every subsequent product at whichever page happened to load first.
+
+   Google honours JS-injected canonicals, but at render time rather than
+   crawl time — expect several weeks before consolidation shows in GSC.
+   ========================================================================= */
+(function () {
+
+  var CANONICAL_HOST = 'www.physisluxe.com';
+
+  // Parameters removed from the canonical URL. Square's own share/session
+  // params first, then the usual ad and analytics click IDs.
+  var STRIP_PARAMS = /^(cs|cst|si|utm_[a-z_]+|fbclid|gclid|gbraid|wbraid|msclkid|ttclid|twclid|igshid|mc_cid|mc_eid|_gl|ref|source)$/i;
+
+  // Paths that should never carry a canonical — transactional pages Google
+  // has no business indexing in the first place.
+  var SKIP_PATHS = /^\/(cart|checkout|order-confirmation|account|login|search)/i;
+
+  function buildCanonical() {
+    var url;
+    try {
+      url = new URL(window.location.href);
+    } catch (e) {
+      return null;
+    }
+
+    url.protocol = 'https:';
+    url.hostname = CANONICAL_HOST;
+    url.port = '';
+    url.hash = '';
+
+    var kept = new URLSearchParams();
+    url.searchParams.forEach(function (value, key) {
+      if (!STRIP_PARAMS.test(key)) kept.append(key, value);
+    });
+    var qs = kept.toString();
+    url.search = qs ? '?' + qs : '';
+
+    return url.toString();
+  }
+
+  function setCanonical() {
+    if (SKIP_PATHS.test(window.location.pathname)) return;
+
+    var href = buildCanonical();
+    if (!href) return;
+
+    var link = document.querySelector('link[rel="canonical"]');
+    if (!link) {
+      link = document.createElement('link');
+      link.setAttribute('rel', 'canonical');
+      document.head.appendChild(link);
+    }
+    if (link.href !== href) link.href = href;
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setCanonical);
+  }
+  setCanonical();
+
+  // Square rewrites the URL via the History API on SPA navigation, which
+  // fires no event of its own — patch both methods so the canonical follows.
+  ['pushState', 'replaceState'].forEach(function (method) {
+    var original = history[method];
+    history[method] = function () {
+      var result = original.apply(this, arguments);
+      setTimeout(setCanonical, 0);
+      return result;
+    };
+  });
+
+  window.addEventListener('popstate', function () { setTimeout(setCanonical, 0); });
+  window.addEventListener('hashchange', function () { setTimeout(setCanonical, 0); });
+
+  // Belt-and-braces: catch any late route change the patches above miss.
+  setTimeout(setCanonical, 600);
+  setTimeout(setCanonical, 1500);
+
+})();
+
+
+/* =========================================================================
    PHYSIS LUXE — Merchant listing schema augmentation
    -------------------------------------------------------------------------
    Adds brand + hasMerchantReturnPolicy + shippingDetails to Square's
@@ -129,33 +222,44 @@
    ========================================================================= */
 (function () {
 
-  /* ---- EDIT THESE TO MATCH YOUR VISIBLE Shipping & Returns PAGE ----------
-     Google flags mismatches between structured data and your policy pages,
-     so every value below must match what customers actually see on the site.
+  /* ---- THESE VALUES MIRROR THE LIVE Shipping & Returns PAGE --------------
+     Google cross-checks structured data against the policy customers can
+     actually read on the site, and suppresses merchant listings when the two
+     disagree. Any edit to the Shipping and Returns page must be mirrored
+     here in the same session.
+
+     Current site policy (verify before changing):
+       Shipping  — $5.95 standard, free over $75
+                   1–2 business days handling, 5–7 business days transit
+       Returns   — 30-day window, return by mail,
+                   return postage paid by the customer
      ---------------------------------------------------------------------- */
   var CONFIG = {
     brand: 'Physis Luxe',
     country: 'US',
     currency: 'USD',
 
-    // SHIPPING (example = free domestic shipping)
+    // SHIPPING — standard rate is declared. The free-over-$75 threshold is
+    // deliberately not encoded: expressing a conditional rate needs multiple
+    // ShippingRateSettings, and declaring a flat $5.95 understates the offer
+    // rather than overstating it, which is the safe direction with Google.
     shipping: {
-      rate: 0,             // 0 = free. Use e.g. 5.99 for a flat rate.
-      handlingMinDays: 0,  // business days to process before dispatch
-      handlingMaxDays: 1,
-      transitMinDays: 2,   // business days in transit
-      transitMaxDays: 5
+      rate: 5.95,
+      handlingMinDays: 1,
+      handlingMaxDays: 2,
+      transitMinDays: 5,
+      transitMaxDays: 7
     },
 
     // RETURNS
-    // If you accept returns, keep 'finite' and set the window/fee/method.
-    // IMPORTANT for skincare: if your policy is final-sale / no returns,
-    // set returnsAccepted:false below instead of guessing a window.
     returnsAccepted: true,
     returns: {
-      days: 30,                                 // return window (days)
-      fee: 'https://schema.org/FreeReturn',     // or https://schema.org/ReturnShippingFees
-      method: 'https://schema.org/ReturnByMail' // or ...ReturnInStore
+      days: 30,
+      // Return postage is the customer's responsibility per the policy page.
+      // ReturnFeesCustomerResponsibility states this without needing a
+      // specific amount, unlike ReturnShippingFees.
+      fee: 'https://schema.org/ReturnFeesCustomerResponsibility',
+      method: 'https://schema.org/ReturnByMail'
     }
   };
   /* ---------------------------------------------------------------------- */
